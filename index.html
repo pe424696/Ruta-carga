@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RutaCarga MX — Ruteo real para autotransporte federal</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --asphalt-900:#14171a; --asphalt-800:#1c2024; --asphalt-700:#2a2e33; --asphalt-600:#3a3f45;
+    --caution-400:#f2b705; --caution-300:#ffd23f;
+    --route-500:#2f855a; --route-400:#3fa873;
+    --alert-500:#c5453a;
+    --fog-100:#e8e6df; --fog-300:#b7b4ab;
+    --radius:3px;
+  }
+  body.light{
+    --asphalt-900:#f4f3ee; --asphalt-800:#ffffff; --asphalt-700:#f0efe8; --asphalt-600:#d9d7cd;
+    --caution-400:#c98b02; --caution-300:#a86e00;
+    --route-500:#2f855a; --route-400:#227a4e;
+    --alert-500:#c5453a;
+    --fog-100:#1c2024; --fog-300:#6b6a62;
+  }
+  body.light .leaflet-popup-content-wrapper{background:var(--asphalt-700);color:var(--fog-100);}
+  body.light .leaflet-popup-tip{background:var(--asphalt-700);}
+  body.light .live-hud{background:rgba(255,255,255,0.94);}
+  body.light .map-btn{box-shadow:0 2px 8px rgba(0,0,0,0.15);}
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:var(--asphalt-900);color:var(--fog-100);font-family:'IBM Plex Sans',sans-serif;}
+  .app{display:grid;grid-template-columns:400px 1fr;grid-template-rows:60px 1fr;height:100vh;}
+  @media (max-width:860px){ .app{grid-template-columns:1fr;grid-template-rows:60px auto 42vh;} }
+
+  header{grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 20px;
+    background:var(--asphalt-800);border-bottom:3px solid var(--caution-400);}
+  .logo-mark{width:32px;height:32px;background:var(--caution-400);border-radius:2px;
+    display:flex;align-items:center;justify-content:center;font-family:'Oswald';font-weight:700;
+    color:var(--asphalt-900);font-size:14px;flex-shrink:0;}
+  h1{font-family:'Oswald',sans-serif;font-weight:700;font-size:19px;margin:0;text-transform:uppercase;letter-spacing:0.5px;}
+  .badge-live{margin-left:auto;display:flex;align-items:center;gap:6px;font-family:'IBM Plex Mono';
+    font-size:10.5px;color:var(--fog-300);border:1px solid var(--asphalt-600);padding:4px 9px;border-radius:20px;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--fog-300);}
+  .dot.on{background:var(--route-400);box-shadow:0 0 6px var(--route-400);}
+
+  .panel{background:var(--asphalt-800);padding:18px;overflow-y:auto;border-right:1px solid var(--asphalt-600);}
+  .section-label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:1.5px;
+    color:var(--caution-400);text-transform:uppercase;margin:0 0 10px;display:flex;align-items:center;gap:8px;}
+  .section-label::before{content:'';width:16px;height:2px;background:var(--caution-400);}
+  .section-label small{color:var(--fog-300);letter-spacing:0;text-transform:none;font-size:10.5px;margin-left:2px;}
+
+  details{background:var(--asphalt-700);border:1px solid var(--asphalt-600);border-radius:var(--radius);
+    margin-bottom:16px;}
+  details summary{padding:10px 12px;cursor:pointer;font-size:12.5px;color:var(--fog-100);
+    display:flex;align-items:center;gap:8px;list-style:none;}
+  details summary::-webkit-details-marker{display:none;}
+  details summary .chev{margin-left:auto;font-family:'IBM Plex Mono';color:var(--fog-300);}
+  details[open] summary .chev{transform:rotate(90deg);}
+  .details-body{padding:0 12px 12px;}
+
+  label{display:block;font-size:12px;color:var(--fog-300);margin-bottom:4px;margin-top:12px;}
+  label:first-child{margin-top:0;}
+  select,input{width:100%;background:var(--asphalt-700);border:1px solid var(--asphalt-600);
+    color:var(--fog-100);padding:9px 10px;border-radius:var(--radius);font-size:13.5px;font-family:'IBM Plex Sans',sans-serif;}
+  select:focus,input:focus{outline:2px solid var(--caution-400);outline-offset:1px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}
+  .hint{font-size:10.5px;color:var(--fog-300);margin-top:4px;line-height:1.4;}
+  .hint a{color:var(--caution-400);}
+
+  .loc-field{position:relative;}
+  .loc-row{display:flex;gap:6px;}
+  .loc-row input{flex:1;}
+  .pin-btn{width:38px;flex-shrink:0;background:var(--asphalt-700);border:1px solid var(--asphalt-600);
+    border-radius:var(--radius);color:var(--fog-100);cursor:pointer;font-size:15px;}
+  .pin-btn.active{background:var(--caution-400);color:var(--asphalt-900);border-color:var(--caution-400);}
+  .suggestions{position:absolute;top:100%;left:0;right:0;background:var(--asphalt-700);
+    border:1px solid var(--asphalt-600);border-top:none;z-index:1000;max-height:180px;overflow-y:auto;
+    border-radius:0 0 var(--radius) var(--radius);}
+  .suggestions div{padding:8px 10px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--asphalt-600);}
+  .suggestions div:hover{background:var(--asphalt-600);}
+  .suggestions div:last-child{border-bottom:none;}
+
+  button.calc{margin-top:18px;width:100%;background:var(--caution-400);color:var(--asphalt-900);
+    border:none;padding:13px;font-family:'Oswald';font-weight:600;font-size:14px;letter-spacing:0.5px;
+    text-transform:uppercase;border-radius:var(--radius);cursor:pointer;}
+  button.calc:hover{background:var(--caution-300);}
+  button.calc:disabled{opacity:0.5;cursor:not-allowed;}
+  button.link-btn{background:none;border:none;color:var(--caution-400);font-size:11.5px;cursor:pointer;
+    padding:0;text-decoration:underline;}
+
+  .divider{height:1px;background:var(--asphalt-600);margin:18px 0;}
+  .result{display:none;}
+  .result.show{display:block;}
+  .status-band{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);
+    font-family:'Oswald';font-weight:600;font-size:12.5px;letter-spacing:0.2px;margin-bottom:14px;}
+  .status-ok{background:rgba(63,168,115,0.15);border:1px solid var(--route-500);color:var(--route-400);}
+  .status-warn{background:rgba(197,69,58,0.15);border:1px solid var(--alert-500);color:#e07a72;}
+  .status-info{background:rgba(242,183,5,0.12);border:1px solid var(--caution-400);color:var(--caution-300);}
+  .semaforo{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .semaforo.ok{background:var(--route-400);}
+  .semaforo.warn{background:var(--alert-500);}
+  .semaforo.info{background:var(--caution-400);}
+
+  .stat-row{display:flex;justify-content:space-between;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--asphalt-700);}
+  .stat-row span:first-child{color:var(--fog-300);}
+  .stat-row span:last-child{font-family:'IBM Plex Mono',monospace;font-weight:500;text-align:right;}
+
+  .mojon-list{list-style:none;padding:0;margin:12px 0 0;}
+  .mojon{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--asphalt-700);}
+  .mojon:last-child{border-bottom:none;}
+  .mojon-icon{width:24px;height:24px;flex-shrink:0;border-radius:2px;display:flex;align-items:center;
+    justify-content:center;font-family:'IBM Plex Mono';font-size:9.5px;font-weight:600;margin-top:1px;}
+  .mojon-icon.pass{background:var(--asphalt-700);color:var(--fog-300);border:1px solid var(--asphalt-600);}
+  .mojon-icon.flag{background:var(--alert-500);color:#fff;}
+  .mojon-body b{font-size:12.5px;display:block;}
+  .mojon-body span{font-size:11px;color:var(--fog-300);}
+
+  .note{font-size:11px;color:var(--fog-300);line-height:1.55;margin-top:16px;padding-top:14px;border-top:1px dashed var(--asphalt-600);}
+  .note b{color:var(--caution-400);}
+  .spinner{display:none;align-items:center;gap:8px;font-size:12px;color:var(--fog-300);margin-top:12px;}
+  .spinner.show{display:flex;}
+  .spinner i{width:12px;height:12px;border:2px solid var(--asphalt-600);border-top-color:var(--caution-400);
+    border-radius:50%;animation:spin 0.7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  #map{width:100%;height:100%;background:var(--asphalt-800);cursor:default;}
+  #map.picking{cursor:crosshair;}
+  .leaflet-popup-content-wrapper{background:var(--asphalt-700);color:var(--fog-100);border-radius:var(--radius);}
+  .leaflet-popup-tip{background:var(--asphalt-700);}
+  .leaflet-container a.leaflet-popup-close-button{color:var(--fog-300);}
+  .map-toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:var(--asphalt-800);
+    border:1px solid var(--caution-400);color:var(--fog-100);padding:7px 14px;border-radius:20px;
+    font-size:12px;z-index:900;display:none;}
+  .map-toast.show{display:block;}
+
+  .live-dot-wrap{position:relative;width:20px;height:20px;}
+  .live-pulse{position:absolute;top:50%;left:50%;width:34px;height:34px;margin:-17px 0 0 -17px;
+    border-radius:50%;background:rgba(63,168,115,0.35);animation:pulse 1.8s ease-out infinite;}
+  .live-arrow{position:absolute;top:50%;left:50%;width:0;height:0;margin:-13px 0 0 -8px;
+    border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:16px solid var(--route-400);
+    filter:drop-shadow(0 0 3px rgba(0,0,0,0.6));transform-origin:50% 62%;}
+  .live-core{position:absolute;top:50%;left:50%;width:13px;height:13px;margin:-6.5px 0 0 -6.5px;
+    border-radius:50%;background:var(--route-400);border:2.5px solid #fff;box-shadow:0 0 4px rgba(0,0,0,0.5);}
+  @keyframes pulse{0%{transform:scale(0.5);opacity:0.9;}100%{transform:scale(1.8);opacity:0;}}
+
+  .map-controls{position:absolute;right:14px;bottom:26px;display:flex;flex-direction:column;gap:8px;z-index:800;}
+  .map-btn{width:42px;height:42px;border-radius:50%;background:var(--asphalt-800);
+    border:1px solid var(--asphalt-600);color:var(--fog-100);font-size:18px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);}
+  .map-btn.active{background:var(--route-400);color:var(--asphalt-900);border-color:var(--route-400);}
+  .map-btn.warn-active{background:var(--alert-500);color:#fff;border-color:var(--alert-500);}
+  .map-btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .live-hud{position:absolute;left:14px;bottom:26px;background:rgba(28,32,36,0.92);
+    border:1px solid var(--asphalt-600);border-radius:var(--radius);padding:10px 14px;z-index:800;display:none;
+    font-family:'IBM Plex Mono',monospace;}
+  .live-hud.show{display:block;}
+  .live-hud .big{font-family:'Oswald';font-size:20px;font-weight:600;color:var(--caution-300);}
+  .live-hud .lbl{font-size:10px;color:var(--fog-300);letter-spacing:0.5px;text-transform:uppercase;}
+
+  .incident-picker{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);
+    background:var(--asphalt-800);border:1px solid var(--alert-500);border-radius:var(--radius);
+    padding:10px;z-index:950;display:none;gap:6px;flex-wrap:wrap;max-width:320px;}
+  .incident-picker.show{display:flex;}
+  .incident-picker .ip-title{width:100%;font-size:11px;color:var(--fog-300);margin-bottom:2px;}
+  .incident-picker button{background:var(--asphalt-700);border:1px solid var(--asphalt-600);
+    color:var(--fog-100);padding:7px 10px;border-radius:20px;font-size:12px;cursor:pointer;}
+  .incident-picker button:hover{background:var(--asphalt-600);}
+  .incident-marker{font-size:18px;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.7));}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo-mark">RC</div>
+    <h1>RutaCarga MX</h1>
+    <div class="badge-live"><span class="dot on" id="apiDot"></span><span id="apiStatus">Modo básico (sin registro) — OSRM</span></div>
+    <div class="badge-live" id="syncBadge" style="margin-left:8px;"><span class="dot" id="syncDot"></span><span id="syncStatus">Verificando sincronización…</span></div>
+    <button id="themeToggle" onclick="toggleTheme()" title="Cambiar tema"
+      style="margin-left:10px;background:var(--asphalt-700);border:1px solid var(--asphalt-600);
+      color:var(--fog-100);width:36px;height:36px;border-radius:50%;cursor:pointer;font-size:16px;flex-shrink:0;">🌙</button>
+  </header>
+
+  <div class="panel">
+    <details>
+      <summary><span>⚙️ Motor de ruteo activo: <b style="color:var(--fog-100);">OSRM (automático, sin registro)</b></span><span class="chev">›</span></summary>
+      <div class="details-body">
+        <p class="hint">Ya puedes calcular rutas sin hacer nada más — este modo usa el servidor público de
+        OSRM (open source, gratis, sin cuenta) sobre toda la red vial de OpenStreetMap en México.
+        No filtra restricciones específicas de camión (altura/peso por tramo), solo valida tus dimensiones
+        contra los máximos federales.</p>
+
+        <div class="divider" style="margin:12px 0;"></div>
+
+        <label style="margin-top:0;">Mejora opcional: API key de openrouteservice</label>
+        <input type="password" id="orsKey" placeholder="Pega aquí tu API key (opcional)">
+        <p class="hint">Con esto activas el perfil real de camión pesado y las alertas de restricción por tramo.
+        Regístrate en <a href="https://openrouteservice.org/dev/#/signup" target="_blank">openrouteservice.org/dev/#/signup</a>.
+        <b>Nota:</b> ahora mismo ORS tiene un error conocido en su registro ("unable to create your API key") —
+        no es un problema de tu cuenta. Si te pasa: prueba en ventana de incógnito, borra cookies del sitio,
+        o inténtalo de nuevo en un rato — es intermitente. Mientras tanto, la app funciona igual con OSRM.</p>
+        <button class="link-btn" style="margin-top:8px;" onclick="activarKey()">Activar clave ORS</button>
+      </div>
+    </details>
+
+    <details>
+      <summary><span>🔥 Compartir fuera de Claude (Firebase, opcional)</span><span class="chev">›</span></summary>
+      <div class="details-body">
+        <p class="hint">Por defecto, los incidentes se comparten usando el almacenamiento de Claude
+        (funciona mientras uses este archivo aquí). Si vas a subir la app a tu propio hosting, conecta
+        Firebase para que la sincronización siga funcionando ahí también — es gratis y en tiempo real real
+        (sin sondeo, se actualiza al instante).</p>
+        <label style="margin-top:10px;">Configuración de tu proyecto Firebase</label>
+        <textarea id="fbConfig" rows="5" placeholder='Pega aquí el objeto que te da Firebase, ej:
+{
+  apiKey: "...",
+  databaseURL: "https://tu-proyecto.firebaseio.com",
+  projectId: "..."
+}' style="width:100%;background:var(--asphalt-700);border:1px solid var(--asphalt-600);color:var(--fog-100);
+          padding:9px 10px;border-radius:var(--radius);font-size:12px;font-family:'IBM Plex Mono',monospace;resize:vertical;"></textarea>
+        <p class="hint">Cómo obtenerlo (5 min, cuenta de Google, sin tarjeta):<br>
+        1) console.firebase.google.com → crear proyecto.<br>
+        2) Menú lateral → Realtime Database → "Crear base de datos" → modo de <b>prueba</b>.<br>
+        3) En "Reglas" pega <code>{"rules":{".read":true,".write":true}}</code> y publica
+        (abierto para el prototipo; ciérralo con autenticación si esto crece).<br>
+        4) ⚙️ Configuración del proyecto → "Tus apps" → ícono <code>&lt;/&gt;</code> Web → registra la app →
+        copia el objeto <code>firebaseConfig</code> completo y pégalo aquí.</p>
+        <button class="link-btn" style="margin-top:8px;" onclick="conectarFirebase()">Conectar Firebase</button>
+      </div>
+    </details>
+
+    <p class="section-label">Vehículo</p>
+    <div class="grid3">
+      <div><label>Altura (m)</label><input type="number" id="height" value="4.00" step="0.05" min="1"></div>
+      <div><label>Ancho (m)</label><input type="number" id="width" value="2.60" step="0.05" min="1"></div>
+      <div><label>Largo (m)</label><input type="number" id="length" value="17.5" step="0.5" min="3"></div>
+    </div>
+    <div class="grid2">
+      <div><label>Peso bruto (kg)</label><input type="number" id="weight" value="38000" step="500" min="0"></div>
+      <div><label>Carga por eje (kg)</label><input type="number" id="axleload" value="9000" step="250" min="0"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <p class="section-label">Origen y destino <small>— cualquier punto de México</small></p>
+
+    <label>Origen</label>
+    <div class="loc-field">
+      <div class="loc-row">
+        <input type="text" id="originText" placeholder="Escribe una dirección, ciudad o lugar…" autocomplete="off">
+        <button class="pin-btn" id="pinOrigin" title="Marcar en el mapa" onclick="togglePick('origin')">📍</button>
+      </div>
+      <div class="suggestions" id="originSuggest" style="display:none;"></div>
+    </div>
+
+    <label>Destino</label>
+    <div class="loc-field">
+      <div class="loc-row">
+        <input type="text" id="destText" placeholder="Escribe una dirección, ciudad o lugar…" autocomplete="off">
+        <button class="pin-btn" id="pinDest" title="Marcar en el mapa" onclick="togglePick('destination')">📍</button>
+      </div>
+      <div class="suggestions" id="destSuggest" style="display:none;"></div>
+    </div>
+    <p class="hint">Escribe y elige una sugerencia, o pulsa 📍 y da clic en el mapa para fijar el punto exacto (útil para bodegas, ranchos o puntos sin dirección formal).</p>
+
+    <button class="calc" id="calcBtn" onclick="calcularRuta()">Calcular ruta</button>
+    <div class="spinner" id="spinner"><i></i><span id="spinnerText">Calculando…</span></div>
+
+    <div class="result" id="result">
+      <div class="divider"></div>
+      <div class="status-band" id="statusBand"></div>
+      <div class="stat-row"><span>Distancia</span><span id="rDist">—</span></div>
+      <div class="stat-row"><span>Tiempo estimado</span><span id="rTime">—</span></div>
+      <div class="stat-row"><span>Altura vs. máx. federal (4.25 m)</span><span id="rHeight">—</span></div>
+      <div class="stat-row"><span>Ancho vs. máx. federal (2.60 m)</span><span id="rWidth">—</span></div>
+
+      <p class="section-label" style="margin-top:16px;">Alertas detectadas en la ruta real <small>(datos OSM)</small></p>
+      <ul class="mojon-list" id="mojonList"></ul>
+    </div>
+
+    <div class="note">
+      <b>Prototipo funcional — datos reales, motor dual.</b> Sin registro, calcula rutas reales con OSRM sobre
+      toda la red vial de OpenStreetMap (carreteras federales, estatales, caminos rurales) — pero sin filtrar
+      restricciones específicas de camión. Si más adelante activas una clave de openrouteservice, se cambia
+      automáticamente al perfil de camión pesado con alertas de restricción por tramo. Los límites de altura
+      (4.25 m) y ancho (2.60 m) corresponden a la NOM-012-SCT-2-2017; el peso máximo permitido varía según
+      tu configuración vehicular y el tipo de camino — verifica tu tabla específica.
+      <br><br>
+      <b>Ubicación en vivo</b> (🧭 en el mapa) usa el GPS del dispositivo vía el navegador — tu navegador
+      pedirá permiso la primera vez. Funciona mejor en el celular al aire libre. Si el navegador bloquea el
+      permiso por abrir el archivo localmente, prueba abrirlo desde un servidor local o subirlo a un hosting
+      con HTTPS.
+      <br><br>
+      <b>Vista satelital</b>: selector arriba a la derecha del mapa (capas de Esri, gratis, sin registro).
+      <br><br>
+      <b>Incidentes</b> (⚠️ en el mapa): si ves el indicador "Incidentes compartidos en vivo" arriba, los
+      reportes se guardan en un almacenamiento compartido y cualquier persona que abra este mismo archivo
+      aquí en Claude los verá (se sincroniza cada ~15 segundos, y se descartan solos después de 6 horas). Si
+      en cambio dice "solo en este dispositivo", significa que se está usando fuera de Claude y los reportes
+      quedan únicamente en tu sesión — para tenerlo compartido en ese caso haría falta conectar una base de
+      datos real como Firebase (gratis también, lo puedo dejar armado si te sirve).
+      <br><br>
+      <b>Tema</b>: botón 🌙/☀️ arriba a la derecha del encabezado, cambia entre modo oscuro y claro; tu
+      preferencia se recuerda automáticamente la próxima vez que abras el archivo aquí en Claude.
+    </div>
+  </div>
+
+  <div style="position:relative;">
+    <div id="map"></div>
+    <div class="map-toast" id="mapToast"></div>
+    <div class="live-hud" id="liveHud">
+      <div class="lbl" id="liveHudLabel">Distancia al destino</div>
+      <div class="big" id="liveHudValue">—</div>
+    </div>
+    <div class="incident-picker" id="incidentPicker">
+      <div class="ip-title">¿Qué reportas en este punto?</div>
+      <button onclick="confirmarIncidente('accidente','🚧')">🚧 Accidente</button>
+      <button onclick="confirmarIncidente('cierre','⛔')">⛔ Cierre / obra</button>
+      <button onclick="confirmarIncidente('retén','🛑')">🛑 Retén / revisión</button>
+      <button onclick="confirmarIncidente('bache','⚠️')">⚠️ Bache severo</button>
+      <button onclick="confirmarIncidente('trafico','🐢')">🐢 Tráfico pesado</button>
+      <button onclick="cancelarIncidente()" style="border-color:var(--alert-500);">Cancelar</button>
+    </div>
+    <div class="map-controls">
+      <button class="map-btn" id="btnUseLocation" title="Usar mi ubicación como origen" onclick="usarUbicacionComoOrigen()">📌</button>
+      <button class="map-btn" id="btnLiveTrack" title="Seguir mi ubicación en vivo" onclick="toggleLiveTracking()">🧭</button>
+      <button class="map-btn" id="btnReportIncident" title="Reportar incidente en el mapa" onclick="toggleReportMode()">⚠️</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let ORS_KEY = '';
+let pickMode = null; // 'origin' | 'destination' | 'incident' | null
+let originPoint = null, destPoint = null; // {lat,lng,label}
+let routeLayer = null, markersLayer, originMarker=null, destMarker=null;
+
+function toggleTheme(){
+  const isLight = document.body.classList.toggle('light');
+  document.getElementById('themeToggle').textContent = isLight ? '☀️' : '🌙';
+  guardarPreferenciaTema(isLight ? 'light' : 'dark');
+}
+async function guardarPreferenciaTema(mode){
+  try{
+    if(window.storage) await window.storage.set('pref:theme', mode, false);
+  }catch(e){ /* sin almacenamiento disponible, no pasa nada */ }
+}
+async function cargarPreferenciaTema(){
+  try{
+    if(window.storage){
+      const r = await window.storage.get('pref:theme', false);
+      if(r && r.value === 'light'){
+        document.body.classList.add('light');
+        document.getElementById('themeToggle').textContent = '☀️';
+      }
+    }
+  }catch(e){ /* usa el default oscuro */ }
+}
+cargarPreferenciaTema();
+
+const map = L.map('map',{zoomControl:true}).setView([23.5,-102.5],5);
+const calleLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+  attribution:'&copy; OpenStreetMap &copy; CARTO', maxZoom:19
+}).addTo(map);
+const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Tiles &copy; Esri', maxZoom:19
+});
+L.control.layers({'🗺️ Calles':calleLayer, '🛰️ Satélite':satLayer}, null, {position:'topright'}).addTo(map);
+markersLayer = L.layerGroup().addTo(map);
+
+function activarKey(){
+  ORS_KEY = document.getElementById('orsKey').value.trim();
+  const dot = document.getElementById('apiDot'), status = document.getElementById('apiStatus');
+  if(ORS_KEY.length > 10){
+    dot.classList.add('on'); status.textContent = 'Modo camión (ORS conectado)';
+  } else {
+    ORS_KEY = '';
+    dot.classList.add('on'); status.textContent = 'Modo básico (sin registro) — OSRM';
+  }
+}
+
+// ---------- Autocompletar lugares (Nominatim) ----------
+function setupAutocomplete(inputId, suggestId, role){
+  const input = document.getElementById(inputId);
+  const box = document.getElementById(suggestId);
+  let timer = null;
+  input.addEventListener('input', ()=>{
+    clearTimeout(timer);
+    const q = input.value.trim();
+    if(q.length < 3){ box.style.display='none'; return; }
+    timer = setTimeout(async ()=>{
+      try{
+        const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=mx&addressdetails=0&limit=6&q=${encodeURIComponent(q)}`;
+        const res = await fetch(url, {headers:{'Accept-Language':'es'}});
+        const data = await res.json();
+        if(!data.length){ box.innerHTML = '<div style="color:var(--fog-300);">Sin resultados</div>'; box.style.display='block'; return; }
+        box.innerHTML = '';
+        data.forEach(place=>{
+          const div = document.createElement('div');
+          div.textContent = place.display_name;
+          div.onclick = ()=>{
+            setPoint(role, {lat:parseFloat(place.lat), lng:parseFloat(place.lon), label:place.display_name});
+            input.value = place.display_name;
+            box.style.display = 'none';
+          };
+          box.appendChild(div);
+        });
+        box.style.display = 'block';
+      }catch(e){
+        box.innerHTML = '<div style="color:var(--alert-500);">Error de búsqueda</div>';
+        box.style.display = 'block';
+      }
+    }, 550);
+  });
+  document.addEventListener('click', (e)=>{
+    if(!box.contains(e.target) && e.target !== input) box.style.display = 'none';
+  });
+}
+setupAutocomplete('originText','originSuggest','origin');
+setupAutocomplete('destText','destSuggest','destination');
+
+// ---------- Selección por clic en el mapa ----------
+function togglePick(role){
+  if(pickMode === 'incident') exitReportMode();
+  pickMode = (pickMode === role) ? null : role;
+  document.getElementById('pinOrigin').classList.toggle('active', pickMode==='origin');
+  document.getElementById('pinDest').classList.toggle('active', pickMode==='destination');
+  document.getElementById('map').classList.toggle('picking', !!pickMode);
+  const toast = document.getElementById('mapToast');
+  if(pickMode){
+    toast.textContent = `Da clic en el mapa para fijar el ${pickMode==='origin'?'origen':'destino'}`;
+    toast.classList.add('show');
+  } else {
+    toast.classList.remove('show');
+  }
+}
+
+// ---------- Firebase (opcional): sincronización real en tiempo real, funciona fuera de Claude ----------
+let firebaseDb = null;
+let firebaseOk = false;
+
+function conectarFirebase(){
+  const raw = document.getElementById('fbConfig').value.trim();
+  if(!raw){ return; }
+  try{
+    const config = (new Function('return (' + raw + ')'))();
+    if(!config.databaseURL){ throw new Error('Falta databaseURL en la configuración'); }
+    const app = firebase.initializeApp(config);
+    firebaseDb = firebase.database();
+    firebaseOk = true;
+    document.getElementById('syncDot').classList.add('on');
+    document.getElementById('syncStatus').textContent = 'Incidentes en vivo (Firebase)';
+    escucharIncidentesFirebase();
+  }catch(e){
+    document.getElementById('syncStatus').textContent = 'Error de configuración Firebase';
+    document.getElementById('mapToast').textContent = 'Firebase: ' + e.message;
+    document.getElementById('mapToast').classList.add('show');
+    setTimeout(()=>document.getElementById('mapToast').classList.remove('show'), 4000);
+  }
+}
+
+function escucharIncidentesFirebase(){
+  firebaseDb.ref('incidents').on('child_added', snap=>{
+    const inc = snap.val();
+    if(!inc) return;
+    if(Date.now() - inc.ts > 6*60*60*1000) return; // ignora incidentes viejos
+    if(incidents.some(i=>i.id===inc.id)) return;
+    incidents.push(inc);
+    pintarIncidente(inc);
+    if(routeLayer) revisarIncidentesEnRuta();
+  });
+  // limpieza silenciosa de incidentes viejos (>6h) en la base compartida
+  firebaseDb.ref('incidents').once('value', snap=>{
+    snap.forEach(child=>{
+      const inc = child.val();
+      if(inc && Date.now()-inc.ts > 6*60*60*1000){ firebaseDb.ref('incidents/'+inc.id).remove(); }
+    });
+  });
+}
+
+// ---------- Reporte de incidentes: compartido en vivo (window.storage) con fallback local ----------
+let incidents = []; // {id,lat,lng,type,emoji,ts}
+let pendingIncidentLatLng = null;
+let incidentMarkers = {}; // id -> L.marker
+let sharedStorageOk = false;
+
+async function initSyncBadge(){
+  const dot = document.getElementById('syncDot'), status = document.getElementById('syncStatus');
+  try{
+    if(window.storage){
+      await window.storage.set('_ping', String(Date.now()), true);
+      sharedStorageOk = true;
+      dot.classList.add('on');
+      status.textContent = 'Incidentes compartidos en vivo';
+    } else {
+      throw new Error('no storage');
+    }
+  }catch(e){
+    sharedStorageOk = false;
+    status.textContent = 'Incidentes solo en este dispositivo';
+  }
+}
+
+function pintarIncidente(inc){
+  if(incidentMarkers[inc.id]) return; // ya está en el mapa
+  const icon = L.divIcon({html:`<span class="incident-marker">${inc.emoji}</span>`, className:'', iconSize:[22,22], iconAnchor:[11,18]});
+  const m = L.marker([inc.lat,inc.lng],{icon}).addTo(markersLayer)
+    .bindPopup(`<b>${inc.emoji} ${inc.type}</b><br>${new Date(inc.ts).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}`);
+  incidentMarkers[inc.id] = m;
+}
+
+async function cargarIncidentesCompartidos(){
+  if(!sharedStorageOk) return;
+  try{
+    const listado = await window.storage.list('incident:', true);
+    if(!listado || !listado.keys) return;
+    for(const key of listado.keys){
+      if(incidents.some(i => 'incident:'+i.id === key)) continue; // ya lo tenemos
+      const r = await window.storage.get(key, true);
+      if(r && r.value){
+        const inc = JSON.parse(r.value);
+        // descarta incidentes con más de 6 horas para no saturar el mapa
+        if(Date.now() - inc.ts < 6*60*60*1000){
+          incidents.push(inc);
+          pintarIncidente(inc);
+        }
+      }
+    }
+  }catch(e){ console.error('Error sincronizando incidentes', e); }
+}
+initSyncBadge().then(cargarIncidentesCompartidos);
+setInterval(cargarIncidentesCompartidos, 15000); // sondeo cada 15s = "casi tiempo real"
+
+function toggleReportMode(){
+  const btn = document.getElementById('btnReportIncident');
+  if(pickMode === 'incident'){
+    exitReportMode();
+    return;
+  }
+  document.getElementById('pinOrigin').classList.remove('active');
+  document.getElementById('pinDest').classList.remove('active');
+  pickMode = 'incident';
+  btn.classList.add('warn-active');
+  document.getElementById('map').classList.add('picking');
+  const toast = document.getElementById('mapToast');
+  toast.textContent = 'Da clic en el punto exacto del incidente';
+  toast.classList.add('show');
+}
+function exitReportMode(){
+  pickMode = null;
+  document.getElementById('btnReportIncident').classList.remove('warn-active');
+  document.getElementById('map').classList.remove('picking');
+  document.getElementById('mapToast').classList.remove('show');
+  document.getElementById('incidentPicker').classList.remove('show');
+}
+function cancelarIncidente(){
+  pendingIncidentLatLng = null;
+  exitReportMode();
+}
+async function confirmarIncidente(type, emoji){
+  if(!pendingIncidentLatLng) return;
+  const {lat,lng} = pendingIncidentLatLng;
+  const id = Date.now()+'-'+Math.random().toString(36).slice(2,7);
+  const incident = {id,lat,lng,type,emoji,ts:Date.now()};
+  incidents.push(incident);
+  pintarIncidente(incident);
+  pendingIncidentLatLng = null;
+  exitReportMode();
+
+  if(firebaseOk){
+    try{ await firebaseDb.ref('incidents/'+id).set(incident); }
+    catch(e){ console.error('No se pudo escribir en Firebase', e); }
+  } else if(sharedStorageOk){
+    try{ await window.storage.set('incident:'+id, JSON.stringify(incident), true); }
+    catch(e){ console.error('No se pudo compartir el incidente', e); }
+  }
+  if(routeLayer) revisarIncidentesEnRuta();
+}
+
+function distPuntoARuta(pt, coords){
+  let min = Infinity;
+  for(const c of coords){
+    const d = haversineKm(pt, {lat:c[0], lng:c[1]});
+    if(d < min) min = d;
+  }
+  return min;
+}
+
+function revisarIncidentesEnRuta(){
+  if(!routeLayer) return [];
+  const coords = routeLayer.getLatLngs().map(ll=>[ll.lat,ll.lng]);
+  const cercanos = incidents.filter(inc => distPuntoARuta({lat:inc.lat,lng:inc.lng}, coords) <= 2);
+  return cercanos;
+}
+map.on('click', async (e)=>{
+  if(pickMode === 'incident'){
+    pendingIncidentLatLng = e.latlng;
+    document.getElementById('incidentPicker').classList.add('show');
+    return;
+  }
+  if(!pickMode) return;
+  const {lat,lng} = e.latlng;
+  setPoint(pickMode, {lat,lng,label:`Punto marcado (${lat.toFixed(4)}, ${lng.toFixed(4)})`});
+  document.getElementById(pickMode==='origin' ? 'originText':'destText').value =
+    `Punto marcado (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+  togglePick(pickMode);
+});
+
+function setPoint(role, point){
+  if(role === 'origin'){
+    originPoint = point;
+    if(originMarker) markersLayer.removeLayer(originMarker);
+    originMarker = L.circleMarker([point.lat,point.lng], {radius:7,color:'#3fa873',fillColor:'#3fa873',fillOpacity:1})
+      .addTo(markersLayer).bindPopup('<b>Origen</b>');
+  } else {
+    destPoint = point;
+    if(destMarker) markersLayer.removeLayer(destMarker);
+    destMarker = L.circleMarker([point.lat,point.lng], {radius:7,color:'#c5453a',fillColor:'#c5453a',fillOpacity:1})
+      .addTo(markersLayer).bindPopup('<b>Destino</b>');
+  }
+}
+
+// ---------- Cálculo de ruta real ----------
+async function calcularRuta(){
+  const band = document.getElementById('statusBand');
+  const result = document.getElementById('result');
+  result.classList.add('show');
+
+  if(!originPoint || !destPoint){
+    band.className = 'status-band status-warn';
+    band.innerHTML = `<span class="semaforo warn"></span> Define un origen y un destino (búsqueda o clic en mapa)`;
+    return;
+  }
+
+  const height = parseFloat(document.getElementById('height').value);
+  const width = parseFloat(document.getElementById('width').value);
+  const length = parseFloat(document.getElementById('length').value);
+  const weightKg = parseFloat(document.getElementById('weight').value);
+  const axleKg = parseFloat(document.getElementById('axleload').value);
+
+  document.getElementById('spinner').classList.add('show');
+  document.getElementById('calcBtn').disabled = true;
+  if(routeLayer){ map.removeLayer(routeLayer); routeLayer = null; }
+
+  try{
+    let coords, distanceM, durationS, restrictionAlerts = [];
+    let usedEngine = 'osrm';
+
+    if(ORS_KEY){
+      usedEngine = 'ors';
+      const body = {
+        coordinates: [[originPoint.lng, originPoint.lat],[destPoint.lng, destPoint.lat]],
+        extra_info: ["roadaccessrestrictions","waytype","surface"],
+        options: {
+          profile_params: {
+            restrictions: {
+              height: height, width: width, length: length,
+              weight: weightKg/1000,       // ORS espera toneladas
+              axleload: axleKg/1000
+            }
+          }
+        }
+      };
+      const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-hgv/geojson', {
+        method:'POST',
+        headers:{'Authorization':ORS_KEY,'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      if(!res.ok) throw new Error(`ORS ${res.status}: ${(await res.text()).slice(0,200)}`);
+      const data = await res.json();
+      const feature = data.features[0];
+      coords = feature.geometry.coordinates.map(c=>[c[1],c[0]]);
+      distanceM = feature.properties.summary.distance;
+      durationS = feature.properties.summary.duration;
+
+      const rar = feature.properties.extras && feature.properties.extras.roadaccessrestrictions;
+      if(rar && rar.values && rar.values.length){
+        rar.values.forEach(seg=>{
+          const [startIdx,endIdx,value] = seg;
+          if(value && value !== 0){
+            const distKm = ((endIdx-startIdx)/coords.length*(distanceM/1000)).toFixed(1);
+            restrictionAlerts.push(`≈ ${distKm} km del tramo · código de restricción ${value}`);
+          }
+        });
+      }
+    } else {
+      // Motor por defecto: OSRM público, sin clave. Perfil auto (no distingue camión).
+      const url = `https://router.project-osrm.org/route/v1/driving/${originPoint.lng},${originPoint.lat};${destPoint.lng},${destPoint.lat}?overview=full&geometries=geojson`;
+      const res = await fetch(url);
+      if(!res.ok) throw new Error(`OSRM ${res.status}`);
+      const data = await res.json();
+      if(data.code !== 'Ok' || !data.routes || !data.routes.length) throw new Error('OSRM no encontró ruta entre esos puntos');
+      const route = data.routes[0];
+      coords = route.geometry.coordinates.map(c=>[c[1],c[0]]);
+      distanceM = route.distance;
+      durationS = route.duration;
+    }
+
+    routeLayer = L.polyline(coords, {color:'#f2b705', weight:4, opacity:0.9}).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), {padding:[40,40]});
+
+    document.getElementById('rDist').textContent = (distanceM/1000).toFixed(1)+' km';
+    document.getElementById('rTime').textContent = Math.round(durationS/60)+' min';
+    document.getElementById('rHeight').textContent = height <= 4.25 ? `${height} m — dentro de norma` : `${height} m — EXCEDE`;
+    document.getElementById('rWidth').textContent = width <= 2.60 ? `${width} m — dentro de norma` : `${width} m — EXCEDE`;
+
+    const mojonList = document.getElementById('mojonList');
+    mojonList.innerHTML = '';
+
+    if(usedEngine === 'osrm'){
+      const li = document.createElement('li');
+      li.className = 'mojon';
+      li.innerHTML = `<div class="mojon-icon pass">i</div>
+        <div class="mojon-body"><b>Modo básico — sin verificación de restricciones por tramo</b>
+        <span>La ruta es real (OSRM/OSM), pero no filtra puentes bajos ni básculas. Activa la clave ORS
+        opcional para ese nivel de detalle.</span></div>`;
+      mojonList.appendChild(li);
+    } else if(restrictionAlerts.length === 0){
+      const li = document.createElement('li');
+      li.className = 'mojon';
+      li.innerHTML = `<div class="mojon-icon pass">✓</div>
+        <div class="mojon-body"><b>Sin restricciones etiquetadas en OSM para este trayecto</b>
+        <span>No implica que no existan — el etiquetado en México aún es parcial.</span></div>`;
+      mojonList.appendChild(li);
+    } else {
+      restrictionAlerts.forEach(txt=>{
+        const li = document.createElement('li');
+        li.className = 'mojon';
+        li.innerHTML = `<div class="mojon-icon flag">!</div>
+          <div class="mojon-body"><b>Tramo con restricción de acceso (OSM)</b><span>${txt}</span></div>`;
+        mojonList.appendChild(li);
+      });
+    }
+
+    const incidentesCerca = revisarIncidentesEnRuta();
+    incidentesCerca.forEach(inc=>{
+      const minsAgo = Math.round((Date.now()-inc.ts)/60000);
+      const li = document.createElement('li');
+      li.className = 'mojon';
+      li.innerHTML = `<div class="mojon-icon flag">${inc.emoji}</div>
+        <div class="mojon-body"><b>Incidente reportado cerca de tu ruta: ${inc.type}</b>
+        <span>Reportado hace ${minsAgo < 1 ? 'un momento' : minsAgo+' min'} · dentro de ~2 km de la ruta</span></div>`;
+      mojonList.appendChild(li);
+    });
+
+    const dimOk = height<=4.25 && width<=2.60;
+    if(!dimOk){
+      band.className = 'status-band status-warn';
+      band.innerHTML = `<span class="semaforo warn"></span> Dimensiones exceden el máximo federal — revisa permiso especial`;
+    } else if(incidentesCerca.length > 0){
+      band.className = 'status-band status-warn';
+      band.innerHTML = `<span class="semaforo warn"></span> ${incidentesCerca.length} incidente(s) reportado(s) cerca de tu ruta`;
+    } else if(usedEngine === 'osrm'){
+      band.className = 'status-band status-info';
+      band.innerHTML = `<span class="semaforo info"></span> Ruta calculada (modo básico) — dimensiones dentro de norma`;
+    } else if(restrictionAlerts.length === 0){
+      band.className = 'status-band status-ok';
+      band.innerHTML = `<span class="semaforo ok"></span> Ruta calculada — sin restricciones detectadas`;
+    } else {
+      band.className = 'status-band status-info';
+      band.innerHTML = `<span class="semaforo info"></span> Ruta calculada — ${restrictionAlerts.length} tramo(s) con restricción a verificar`;
+    }
+
+  }catch(err){
+    band.className = 'status-band status-warn';
+    band.innerHTML = `<span class="semaforo warn"></span> Error al calcular ruta`;
+    document.getElementById('mojonList').innerHTML =
+      `<li class="mojon"><div class="mojon-body"><span>${err.message}</span></div></li>`;
+  } finally {
+    document.getElementById('spinner').classList.remove('show');
+    document.getElementById('calcBtn').disabled = false;
+  }
+}
+
+// ---------- Ubicación en vivo (Geolocation API nativa del navegador) ----------
+let watchId = null;
+let liveMarker = null;
+let liveFollowing = false;
+let lastFix = null; // {lat,lng,heading}
+
+function haversineKm(a,b){
+  const R=6371, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(b.lat-a.lat), dLng=toRad(b.lng-a.lng);
+  const s=Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function bearing(a,b){
+  const toRad=d=>d*Math.PI/180, toDeg=d=>d*180/Math.PI;
+  const y = Math.sin(toRad(b.lng-a.lng))*Math.cos(toRad(b.lat));
+  const x = Math.cos(toRad(a.lat))*Math.sin(toRad(b.lat)) - Math.sin(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.cos(toRad(b.lng-a.lng));
+  return (toDeg(Math.atan2(y,x))+360)%360;
+}
+
+function ensureLiveMarker(lat,lng,heading){
+  const html = `<div class="live-dot-wrap">
+      <div class="live-pulse"></div>
+      <div class="live-arrow" style="transform:rotate(${heading||0}deg);"></div>
+      <div class="live-core"></div>
+    </div>`;
+  const icon = L.divIcon({html, className:'', iconSize:[20,20], iconAnchor:[10,10]});
+  if(!liveMarker){
+    liveMarker = L.marker([lat,lng], {icon, zIndexOffset:1000}).addTo(map).bindPopup('Tú estás aquí');
+  } else {
+    liveMarker.setLatLng([lat,lng]);
+    liveMarker.setIcon(icon);
+  }
+}
+
+function onLiveFix(pos){
+  const {latitude:lat, longitude:lng, heading} = pos.coords;
+  lastFix = {lat,lng,heading: heading || (lastFix && lastFix.heading) || 0};
+  ensureLiveMarker(lat,lng,lastFix.heading);
+
+  if(liveFollowing) map.setView([lat,lng], Math.max(map.getZoom(), 15));
+
+  const hud = document.getElementById('liveHud');
+  if(destPoint){
+    const distKm = haversineKm({lat,lng}, destPoint);
+    document.getElementById('liveHudLabel').textContent = 'Línea recta al destino';
+    document.getElementById('liveHudValue').textContent = distKm < 1 ? Math.round(distKm*1000)+' m' : distKm.toFixed(1)+' km';
+    hud.classList.add('show');
+  } else {
+    hud.classList.remove('show');
+  }
+}
+
+function onLiveError(err){
+  const toast = document.getElementById('mapToast');
+  toast.textContent = 'No se pudo obtener tu ubicación: ' + err.message;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), 3500);
+}
+
+function toggleLiveTracking(){
+  const btn = document.getElementById('btnLiveTrack');
+  if(watchId === null){
+    if(!navigator.geolocation){
+      onLiveError({message:'Este navegador no soporta geolocalización'});
+      return;
+    }
+    watchId = navigator.geolocation.watchPosition(onLiveFix, onLiveError, {
+      enableHighAccuracy:true, maximumAge:2000, timeout:10000
+    });
+    liveFollowing = true;
+    btn.classList.add('active');
+  } else {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    liveFollowing = false;
+    btn.classList.remove('active');
+    document.getElementById('liveHud').classList.remove('show');
+  }
+}
+
+// Si el usuario mueve el mapa manualmente, dejamos de auto-seguir (como en Waze)
+map.on('dragstart', ()=>{ liveFollowing = false; document.getElementById('btnLiveTrack').classList.remove('active'); });
+
+async function usarUbicacionComoOrigen(){
+  const btn = document.getElementById('btnUseLocation');
+  if(!navigator.geolocation){ onLiveError({message:'Este navegador no soporta geolocalización'}); return; }
+  btn.disabled = true; btn.textContent = '…';
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    const {latitude:lat, longitude:lng} = pos.coords;
+    let label = `Mi ubicación (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+    try{
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {headers:{'Accept-Language':'es'}});
+      const data = await res.json();
+      if(data.display_name) label = data.display_name;
+    }catch(e){ /* usa el fallback de coordenadas */ }
+    setPoint('origin', {lat,lng,label});
+    document.getElementById('originText').value = label;
+    map.setView([lat,lng], 14);
+    btn.disabled = false; btn.textContent = '📌';
+  }, (err)=>{ onLiveError(err); btn.disabled = false; btn.textContent = '📌'; }, {enableHighAccuracy:true, timeout:10000});
+}
+
+// Punto de partida sugerido: CDMX centro (solo referencia visual inicial)
+</script>
+</body>
+</html>
